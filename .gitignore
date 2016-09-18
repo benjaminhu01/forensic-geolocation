@@ -61,6 +61,7 @@ target/
 #Ipython Notebook
 .ipynb_checkpoints
 
-# directories with large files
+# directories with large files or "scratch paper" files
 data/*
+playground/*
 *.pyc

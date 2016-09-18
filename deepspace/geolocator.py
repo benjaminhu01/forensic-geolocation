@@ -1,29 +1,32 @@
 
+import imp
+utils = imp.load_source('deepspace', 'deepspace/utils.py')
+
 import numpy as np
 
 class Geolocator(object):
 
     def __init__(self, domain, classifiers):
-        self.domain = np.array(domain)
+        self.domain = domain
         self.classifiers = classifiers
 
     def score_locations(self, X):
         scores = np.zeros((X.shape[0], len(self.domain)))
         for c in self.classifiers:
             probs = c.predict(X)
-            labels = [c.nearest_seed(s) for s in self.domain]
+            labels = c.nearest_seeds(self.domain)
             counts = np.bincount(labels, minlength = len(c.seeds))
             scores += probs[:, labels] / counts[labels][np.newaxis, :]
-        scores /= np.sum(scores, 1)[:, np.newaxis]
+        # scores /= np.sum(scores, 1)[:, np.newaxis]
         return scores
 
     def predict(self, X):
-        scores = self.score_locations(X)
-        points = self.domain[np.apply_along_axis(np.argmax, 1, scores)]
+        scores = self.score_locations(X.as_matrix())
+        points = self.domain.iloc[np.apply_along_axis(np.argmax, 1, scores)]
         return points
 
-    def predict_region(self, X, q):
-        scores = self.score_locations(X)
+    def predict_region(self, data, q):
+        scores = self.score_locations(biomes(data))
         points = self.envelope(scores, q)
         return points
 
@@ -39,6 +42,13 @@ class Geolocator(object):
                 in_region[-1] = np.ones(1, dtype = bool)
             points.append(self.domain[order[in_region]])
         return points
+
+    def error(self, data):
+        origins = utils.locations(data)
+        predictions = self.predict(utils.biomes(data))
+        predictions.set_index(origins.index, inplace=True)
+        return great_circle(origins['lat'], origins['lon'], predictions['lat'], predictions['lon'])
+
 
     # def envelope(self, scores, q):
     #     assert q >= 0. and q <= 1., "Quantile value must belong to [0, 1])."

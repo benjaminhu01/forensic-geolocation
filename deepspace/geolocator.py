@@ -1,61 +1,51 @@
-
-import imp
-utils = imp.load_source('deepspace', 'deepspace/utils.py')
-
 import numpy as np
+import pandas as pd
 
 class Geolocator(object):
 
-    def __init__(self, domain, classifiers):
+    def __init__(self, ensemble, domain):
+        self.ensemble = ensemble
         self.domain = domain
-        self.classifiers = classifiers
 
-    def score_locations(self, X):
-        scores = np.zeros((X.shape[0], len(self.domain)))
-        for c in self.classifiers:
-            probs = c.predict(X)
-            labels = c.nearest_seeds(self.domain)
-            counts = np.bincount(labels, minlength = len(c.seeds))
-            scores += probs[:, labels] / counts[labels][np.newaxis, :]
-        # scores /= np.sum(scores, 1)[:, np.newaxis]
+    def score(self, X, normalize=False):
+        idx = pd.MultiIndex.from_product([X.index, self.domain.index],
+                                         names=['ids', 'domain'])
+        scores = pd.Series(0, index=idx, name='score', dtype=float)
+        scale_by_size = lambda x: x / len(x)
+        for clf in self.ensemble:
+            cells = clf._assign_cells(self.domain)
+            cells = pd.Series(cells, index=self.domain.index, name='cell')
+            proba = clf.predict_proba(X.as_matrix()).T
+            proba = pd.DataFrame(proba, index=clf.seeds.index, columns=X.index)
+            points = (cells.to_frame()
+                           .join(proba, on='cell')
+                           .groupby('cell')
+                           .transform(scale_by_size)
+                           .unstack()
+                           .rename('score'))
+            scores = scores.add(points)
+        if normalize:
+            scores = scores.groupby(level='ids').transform(lambda x: x / x.sum())
         return scores
 
     def predict(self, X):
-        scores = self.score_locations(X.as_matrix())
-        points = self.domain.iloc[np.apply_along_axis(np.argmax, 1, scores)]
-        return points
+        scores = self.score(X)
+        idx = scores.groupby(level='ids').idxmax()
+        preds = (scores.ix[idx]
+                       .to_frame()
+                       .join(self.domain, how='inner'))
+        return preds
 
-    def predict_region(self, data, q):
-        scores = self.score_locations(biomes(data))
-        points = self.envelope(scores, q)
-        return points
-
-    def envelope(self, scores, q):
-        assert 0. <= q <= 1., "Quantile value must belong to [0, 1]."
-        points = []
-        for score in scores:
-            order = np.argsort(score)
-            in_region = np.cumsum(score[order]) >= 1. - q
-            if not np.any(in_region):
-                # scores may not sum perfectly to 1 due to machine precision
-                # so make sure to force inclusion of the final point
-                in_region[-1] = np.ones(1, dtype = bool)
-            points.append(self.domain[order[in_region]])
-        return points
-
-    def error(self, data):
-        origins = utils.locations(data)
-        predictions = self.predict(utils.biomes(data))
-        predictions.set_index(origins.index, inplace=True)
-        return great_circle(origins['lat'], origins['lon'], predictions['lat'], predictions['lon'])
-
-
-    # def envelope(self, scores, q):
-    #     assert q >= 0. and q <= 1., "Quantile value must belong to [0, 1])."
-    #     order = np.argsort(scores)
-    #     in_region = np.cumsum(scores[order]) >= 1. - q
-    #     if not np.any(in_region):
-    #         # scores may not sum perfectly to 1 due to rounding error
-    #         # so make sure to force inclusion of the final point
-    #         in_region[-1] = np.ones(1, dtype = bool)
-    #     return self.domain[order[in_region]]
+    def predict_regions(self, X, quantile):
+        scores = self.score(X, normalize=True)
+        preds = self.threshold(scores, quantile)
+        return preds
+    
+    def threshold(self, scores, quantile):
+        assert 0. <= quantile <= 1., "Quantile must belong to [0, 1]."
+        cum_scores = (scores.groupby(level='ids')
+                            .transform(lambda x: x.sort_values(ascending=False).cumsum()))
+        preds = (cum_scores.groupby(level='ids')
+                .apply(lambda x: x[(x < quantile).shift(1).fillna(x[0] < quantile)]))
+        print(preds.groupby(level='ids').max())
+        return preds

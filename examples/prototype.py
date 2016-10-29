@@ -13,6 +13,8 @@ from keras.layers.core import Dense, Dropout, Activation
 from keras.optimizers import SGD
 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
 
 np.random.seed(881)  # for reproducibility
 
@@ -31,58 +33,54 @@ def main():
 
     # Weight sample points proportionally by state population
     weights = scale_by_population(grouped.get_group('train')[['state']])
+    weights = weights.as_matrix().flatten() 
 
     # Fit deep neural network (DNN) ensemble of Voronoi classifiers
     n_cells_min, n_cells_max = (30, 60)
-    n_classifiers = 3
-    ensemble = []
+    n_classifiers = 10
+    ensemble_nnc = []
+    ensemble_knc = []
+    ensemble_svc = []
+    ensemble_rfc = []
     for i in range(n_classifiers):
         print('Training classifier %d of %d' % (i+1, n_classifiers))
         n_cells = np.random.randint(n_cells_min, n_cells_max)
-        model = Sequential()
-        model.add(Dense(512, input_shape=(p, )))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.2))
-        model.add(Dense(512))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.2))
-        model.add(Dense(512))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.2))
-        model.add(Dense(n_cells))
-        model.add(Activation('softmax'))
+        nnc = Sequential()
+        nnc.add(Dense(512, input_shape=(p, )))
+        nnc.add(Activation('relu'))
+        nnc.add(Dropout(0.2))
+        nnc.add(Dense(512))
+        nnc.add(Activation('relu'))
+        nnc.add(Dropout(0.2))
+        nnc.add(Dense(512))
+        nnc.add(Activation('relu'))
+        nnc.add(Dropout(0.2))
+        nnc.add(Dense(512))
+        nnc.add(Activation('relu'))
+        nnc.add(Dropout(0.2))
+        nnc.add(Dense(n_cells))
+        nnc.add(Activation('softmax'))
         sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
-        clf = ds.VoronoiClassifier(model, domain, n_cells)
-        start = time.clock()
-        clf.fit(X_train.as_matrix(), s_train, binary_matrix=True,
-                nb_epoch=20, batch_size=64, sample_weight=weights.as_matrix().flatten())
-        end = time.clock()
-        print(end - start)
-        ensemble.append(clf)
+        nnc.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
+        knc = KNeighborsClassifier(n_neighbors=20)
+        svc = SVC(probability=True)
+        rfc = RandomForestClassifier(n_estimators=100)
+        clf_nnc = ds.VoronoiClassifier(nnc, domain, n_cells)
+        clf_knc = ds.VoronoiClassifier(knc, domain, n_cells)
+        clf_svc = ds.VoronoiClassifier(svc, domain, n_cells)
+        clf_rfc = ds.VoronoiClassifier(rfc, domain, n_cells)
+        clf_nnc.fit(X_train.as_matrix(), s_train, sample_weight=weights, 
+                binary_matrix=True, nb_epoch=30, batch_size=32)
+        clf_knc.fit(X_train.as_matrix(), s_train)
+        clf_svc.fit(X_train.as_matrix(), s_train, sample_weight=weights)
+        clf_rfc.fit(X_train.as_matrix(), s_train, sample_weight=weights)
+        ensemble_nnc.append(clf_nnc)
+        ensemble_knc.append(clf_knc)
+        ensemble_svc.append(clf_svc)
+        ensemble_rfc.append(clf_rfc)
 
     # Predict origin of testing data
-    geo = ds.Geolocator(ensemble, domain)
-    predictions = geo.predict(X_test)
-    errors = ds.distance(s_test, predictions)
-    print(errors.describe())
-    region_90 = geo.predict_regions(X_test, quantile=0.9)
-    
-    # Fit random forest ensemble of Voronoi classifiers
-    ensemble = []
-    for i in range(n_classifiers):
-        print('Training classifier %d of %d' % (i+1, n_classifiers))
-        n_cells = np.random.randint(n_cells_min, n_cells_max)
-        model = RandomForestClassifier(n_estimators=100)
-        clf = ds.VoronoiClassifier(model, domain, n_cells)
-        start = time.clock()
-        clf.fit(X_train.as_matrix(), s_train,
-                sample_weight=weights.as_matrix().flatten())
-        end = time.clock()
-        print(end - start)
-        ensemble.append(clf)
-
-    # Predict origin of testing data
+    ensemble = ensemble_nnc + ensemble_knc + ensemble_svc + ensemble_rfc
     geo = ds.Geolocator(ensemble, domain)
     predictions = geo.predict(X_test)
     errors = ds.distance(s_test, predictions)

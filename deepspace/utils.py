@@ -41,3 +41,21 @@ def great_circle(lat1, lon1, lat2, lon2, miles=False):
     arc = np.arccos(np.clip(cos, -1, 1))
     arc_length = 3960 if miles else 6373 # kilometers
     return arc * arc_length
+
+def to_categorical(y, nb_classes=None):
+    '''
+    Utility from keras.utils.np_utils.
+    Convert class vector (integers from 0 to nb_classes) to binary class matrix, for use with categorical_crossentropy.
+    # Arguments
+        y: class vector to be converted into a matrix
+        nb_classes: total number of classes
+    # Returns
+        A binary matrix representation of the input.
+    '''
+    if not nb_classes:
+        nb_classes = np.max(y)+1
+    Y = np.zeros((len(y), nb_classes))
+    for i in range(len(y)):
+        Y[i, y[i]] = 1.
+    return Y
+

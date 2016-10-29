@@ -1,7 +1,7 @@
 import numpy as np
 
 from .utils import pairwise_distances
-from keras.utils import np_utils 
+from .utils import to_categorical
 
 class VoronoiClassifier(object):
     """
@@ -14,10 +14,10 @@ class VoronoiClassifier(object):
         self.seeds.index.set_names('seeds', inplace=True)
         self.n_cells = n_cells
 
-    def fit(self, X, s, to_categorical=False, **kwargs):
+    def fit(self, X, s, binary_matrix=False, **kwargs):
         y = self._assign_cells(s)
-        if to_categorical:
-            y = np_utils.to_categorical(y, self.n_cells)
+        if binary_matrix:
+            y = to_categorical(y, self.n_cells)
         self.model.fit(X, y, **kwargs)
 
     def predict(self, X, **kwargs):

@@ -1,16 +1,18 @@
 import numpy as np
 import pandas as pd
 
+from .utils import distance
+
 class Geolocator(object):
 
     def __init__(self, ensemble, domain):
         self.ensemble = ensemble
         self.domain = domain
 
-    def score(self, X, **kwargs):
+    def evaluate_likelihood(self, X, **kwargs):
         idx = pd.MultiIndex.from_product([X.index, self.domain.index],
                                          names=['ids', 'domain'])
-        scores = pd.Series(0, index=idx, name='score', dtype=float)
+        likelihood = pd.Series(0, index=idx, name='likelihood', dtype=float)
         scale_by_size = lambda x: x / len(x)
         for clf in self.ensemble:
             cells = clf._assign_cells(self.domain)
@@ -26,28 +28,33 @@ class Geolocator(object):
                            .groupby('cell')
                            .transform(scale_by_size)
                            .unstack()
-                           .rename('score'))
-            scores = scores.add(points)
-        return scores
+                           .rename('likelihood'))
+            likelihood = likelihood.add(points)
+        return likelihood
 
     def predict(self, X, **kwargs):
-        scores = self.score(X, **kwargs)
-        idx = scores.groupby(level='ids').idxmax()
-        preds = (scores.ix[idx]
-                       .to_frame()
-                       .join(self.domain, how='inner'))
+        likelihood = self.evaluate_likelihood(X, **kwargs)
+        idx = likelihood.groupby(level='ids').idxmax()
+        preds = (likelihood.ix[idx]
+                           .to_frame()
+                           .join(self.domain, how='inner'))
         return preds
 
     def predict_regions(self, X, quantile, **kwargs):
-        scores = self.score(X, **kwargs)
-        scores = scores.groupby(level='ids').transform(lambda x: x / x.sum())
-        preds = self.threshold(scores, quantile)
+        likelihood = self.evaluate_likelihood(X, **kwargs)
+        probs = likelihood.groupby(level='ids').transform(lambda x: x / x.sum())
+        preds = self.threshold(probs, quantile)
         return preds
+
+    def score(self, X, s, **kwargs):
+        preds = self.predict(X, **kwargs)
+        errors = distance(s, preds)
+        return errors
     
-    def threshold(self, scores, quantile):
+    def threshold(self, probs, quantile):
         assert 0. <= quantile <= 1., "Quantile must belong to [0, 1]."
-        cum_scores = (scores.groupby(level='ids')
-                            .transform(lambda x: x.sort_values(ascending=False).cumsum()))
-        preds = (cum_scores.groupby(level='ids')
+        cum_probs = (probs.groupby(level='ids')
+                          .transform(lambda x: x.sort_values(ascending=False).cumsum()))
+        preds = (cum_probs.groupby(level='ids')
                 .apply(lambda x: x[(x < quantile).shift(1).fillna(x[0] < quantile)]))
         return preds

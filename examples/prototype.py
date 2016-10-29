@@ -82,10 +82,8 @@ def main():
     # Predict origin of testing data
     ensemble = ensemble_nnc + ensemble_knc + ensemble_svc + ensemble_rfc
     geo = ds.Geolocator(ensemble, domain)
-    predictions = geo.predict(X_test)
-    errors = ds.distance(s_test, predictions)
+    errors = geo.score(X_test, s_test)
     print(errors.describe())
-    region_90 = geo.predict_regions(X_test, quantile=0.9)
 
 def get_data_dir():
     return '/Users/nsgrantham/Code/deepspace/data/'

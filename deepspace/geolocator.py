@@ -9,7 +9,7 @@ class Geolocator(object):
         self.ensemble = ensemble
         self.domain = domain
 
-    def evaluate_likelihood(self, X, **kwargs):
+    def evaluate_likelihood(self, X, normalize=False, **kwargs):
         idx = pd.MultiIndex.from_product([X.index, self.domain.index],
                                          names=['ids', 'domain'])
         likelihood = pd.Series(0, index=idx, name='likelihood', dtype=float)
@@ -30,6 +30,9 @@ class Geolocator(object):
                            .unstack()
                            .rename('likelihood'))
             likelihood = likelihood.add(points)
+        if normalize:
+            likelihood = (likelihood.groupby(level='ids').transform(lambda x: x / x.sum())
+                            .rename(index='probability', inplace=True))
         return likelihood
 
     def predict(self, X, **kwargs):
@@ -41,8 +44,7 @@ class Geolocator(object):
         return preds
 
     def predict_regions(self, X, quantile, **kwargs):
-        likelihood = self.evaluate_likelihood(X, **kwargs)
-        probs = likelihood.groupby(level='ids').transform(lambda x: x / x.sum())
+        probs = self.evaluate_likelihood(X, normalize=True, **kwargs)
         preds = self.threshold(probs, quantile)
         return preds
 
@@ -52,9 +54,19 @@ class Geolocator(object):
         return errors
     
     def threshold(self, probs, quantile):
-        assert 0. <= quantile <= 1., "Quantile must belong to [0, 1]."
+        idx = probs.index
         cum_probs = (probs.groupby(level='ids')
-                          .transform(lambda x: x.sort_values(ascending=False).cumsum()))
+                    .apply(lambda x: x.sort_values(ascending=False).cumsum()))
+        cum_probs.index = cum_probs.index.droplevel(0)
+        def determine_region(x):
+            reg = pd.Series(1.0, index=x.index, dtype=float)
+            for q in sorted(quantile)[::-1]:
+                assert 0. <= q <= 1., "Quantile must belong to [0, 1]."
+                is_within_region = (x < q).shift(1).fillna(x[0] < q)
+                reg[is_within_region] = q
+            return reg
         preds = (cum_probs.groupby(level='ids')
-                .apply(lambda x: x[(x < quantile).shift(1).fillna(x[0] < quantile)]))
+                .apply(determine_region)
+                .sort_index(level=0)
+                .rename('prob_region'))
         return preds

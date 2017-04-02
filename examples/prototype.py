@@ -90,7 +90,8 @@ def get_data_dir():
 
 def load_domain():
     data_dir = get_data_dir()
-    domain = pd.read_csv(os.path.join(data_dir, 'homes1000/grid-lonlat.csv'))
+    domain = pd.read_csv(os.path.join(data_dir, 'homes1000', 'conus-5k-centroids.csv'), index_col='id')
+    domain = domain.rename(columns={'X': 'lon', 'Y': 'lat'})
     domain.index.set_names('domain', inplace=True)
     return domain[['lat', 'lon']]
 
@@ -107,7 +108,7 @@ def load_homes1000():
 
 def scale_by_population(states):
     data_dir = get_data_dir()
-    uspop = pd.read_csv(os.path.join(data_dir, 'homes1000/US-states.csv'), 
+    uspop = pd.read_csv(os.path.join(data_dir, 'homes1000', 'US-states.csv'), 
             header=None, usecols=(1, 2))
     uspop.columns = ['state', 'pop']
     uspop.set_index('state', inplace=True)

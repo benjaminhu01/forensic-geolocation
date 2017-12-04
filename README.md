@@ -1,2 +1,2 @@
-# deepspace
-Deep spatial learning for forensic geolocation in Python.
+# forensic-geolocation
+Forensic geolocation using the ambient dust microbiome.
